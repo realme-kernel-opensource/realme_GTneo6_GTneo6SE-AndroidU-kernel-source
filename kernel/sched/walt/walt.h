@@ -23,6 +23,14 @@
 
 #define MSEC_TO_NSEC (1000 * 1000)
 
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_ASSIST)
+#include <../kernel/oplus_cpu/sched/sched_assist/sa_fair.h>
+#endif
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FRAME_BOOST)
+#include <../kernel/oplus_cpu/sched/frame_boost/frame_group.h>
+#endif
+
 #ifdef CONFIG_HZ_300
 /*
  * Tick interval becomes to 3333333 due to
@@ -190,6 +198,7 @@ extern cpumask_t cpus_paused_by_us;
 extern cpumask_t cpus_part_paused_by_us;
 /*END SCHED.H PORT*/
 
+extern u64 walt_sched_clock(void);
 extern int num_sched_clusters;
 extern int nr_big_cpus;
 extern unsigned int sched_capacity_margin_up[WALT_NR_CPUS];
@@ -273,6 +282,9 @@ extern unsigned int sysctl_ed_boost_pct;
 extern unsigned int sysctl_em_inflate_pct;
 extern unsigned int sysctl_em_inflate_thres;
 extern unsigned int sysctl_sched_heavy_nr;
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_PIPELINE)
+extern unsigned int enable_pipeline_boost;
+#endif
 
 extern int cpufreq_walt_set_adaptive_freq(unsigned int cpu, unsigned int adaptive_low_freq,
 					  unsigned int adaptive_high_freq);
@@ -293,6 +305,11 @@ extern unsigned int high_perf_cluster_freq_cap[MAX_CLUSTERS];
 extern unsigned int fmax_cap[MAX_FREQ_CAP][MAX_CLUSTERS];
 extern int sched_dynamic_tp_handler(struct ctl_table *table, int write,
 			void __user *buffer, size_t *lenp, loff_t *ppos);
+
+#ifdef CONFIG_OPLUS_FEATURE_SUGOV_TL
+extern unsigned int get_targetload(struct cpufreq_policy *policy);
+#endif /* CONFIG_OPLUS_FEATURE_SUGOV_TL */
+
 extern struct freq_relation_map relation_data[MAX_CLUSTERS][MAX_FREQ_RELATIONS];
 extern struct list_head cluster_head;
 #define for_each_sched_cluster(cluster) \
@@ -376,6 +393,9 @@ extern cpumask_t cpus_for_pipeline;
 #define WALT_CPUFREQ_BOOST_UPDATE	0x20
 #define WALT_CPUFREQ_ASYM_FIXUP		0x40
 #define WALT_CPUFREQ_SHARED_RAIL	0x80
+#if IS_ENABLED(CONFIG_OPLUS_CPUFREQ_IOWAIT_PROTECT)
+#define WALT_CPUFREQ_IOWAIT     (1U << 10)
+#endif
 
 #define CPUFREQ_REASON_LOAD		0
 #define CPUFREQ_REASON_BTR		0x1
@@ -551,6 +571,11 @@ static inline bool rt_boost_on_big(void)
 static inline bool is_full_throttle_boost(void)
 {
 	return sched_boost_type == FULL_THROTTLE_BOOST;
+}
+
+static inline bool is_conservative_boost(void)
+{
+	return sched_boost_type == CONSERVATIVE_BOOST;
 }
 
 static inline bool is_storage_boost(void)
@@ -1054,6 +1079,16 @@ static inline bool is_state1(void)
 /* determine if this task should be allowed to use a partially halted cpu */
 static inline bool task_reject_partialhalt_cpu(struct task_struct *p, int cpu)
 {
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_ASSIST)
+	if (!task_tpd_check(p, cpu))
+		return true;
+	if (should_ux_task_skip_cpu(p, cpu))
+		return true;
+#endif
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FRAME_BOOST)
+	if (fbg_skip_migration(p, task_cpu(p), cpu))
+		return true;
+#endif
 	if (p->prio < MAX_RT_PRIO)
 		return false;
 
